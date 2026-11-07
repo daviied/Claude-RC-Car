@@ -1,0 +1,40 @@
+# Paste into CasaOS (Custom install -> Import -> Docker Compose).
+# Replace every "change-me" value, or set them in CasaOS env settings.
+name: rc-car
+
+services:
+  rc-car:
+    image: ghcr.io/daviied/rc-car:latest
+    container_name: rc-car
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      APP_PASSWORD: ${APP_PASSWORD:-change-me}
+      CAR_TOKEN: ${CAR_TOKEN:-change-me}
+      SECRET_KEY: ${SECRET_KEY:-change-me}
+      TURN_SECRET: ${TURN_SECRET:-change-me}
+      TURN_HOST: ${TURN_HOST:-turn.example.com}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+
+  # TURN relay: needed because LTE carriers use CGNAT.
+  # Host network so the UDP relay port range works.
+  coturn:
+    image: coturn/coturn:4.6
+    container_name: rc-car-turn
+    restart: unless-stopped
+    network_mode: host
+    command:
+      - -n
+      - --log-file=stdout
+      - --listening-port=3478
+      - --min-port=49160
+      - --max-port=49200
+      - --fingerprint
+      - --use-auth-secret
+      - --static-auth-secret=${TURN_SECRET:-change-me}
+      - --realm=${TURN_HOST:-turn.example.com}
+      # Behind a home router use PUBLIC_IP/LAN_IP, e.g. 203.0.113.10/192.168.1.50
+      - --external-ip=${PUBLIC_IP:-203.0.113.10}
+      - --no-cli
+      - --no-multicast-peers

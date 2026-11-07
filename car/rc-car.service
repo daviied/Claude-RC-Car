@@ -1,0 +1,15 @@
+[Unit]
+Description=RC car client
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=pi
+WorkingDirectory=/home/pi/Rc-Car/car
+EnvironmentFile=/home/pi/Rc-Car/car/.env
+ExecStart=/home/pi/rc/bin/python car.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

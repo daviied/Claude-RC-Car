@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#111111">
+  <title>RC Car</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="{{ url_for('static', filename='icon.svg') }}" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='icon.svg') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" integrity="sha384-2huaZvOR9iDzHqslqwpR87isEmrfxqyWOF7hr7BY6KG0+hVKLoEXMPUJw3ynWuhO" crossorigin="anonymous"></script>
+</head>
+<body>
+  <header>
+    <span>RC Car</span>
+    <span id="car" class="pill off">Car offline</span>
+    <span id="video" class="pill off">Video: idle</span>
+    <span id="gp" class="pill off">No controller</span>
+    <span id="rtt" class="pill">-- ms</span>
+    <a href="/logout">Log out</a>
+  </header>
+
+  <main>
+    <video id="cam" autoplay playsinline muted></video>
+
+    <div id="pad">
+      <button data-key="w" style="grid-area:up">▲</button>
+      <button data-key="a" style="grid-area:left">◀</button>
+      <button data-key="s" style="grid-area:down">▼</button>
+      <button data-key="d" style="grid-area:right">▶</button>
+    </div>
+    <p class="hint">Keyboard: W A S D or arrow keys · Controller: RT/LT throttle, left stick steer (press a button to connect)</p>
+  </main>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
