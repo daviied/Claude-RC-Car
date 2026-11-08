@@ -127,6 +127,7 @@ const r2 = (v) => Math.round(v * 100) / 100;
 window.addEventListener('gamepadconnected', (e) => {
   padIndex = e.gamepad.index;
   setPill('gp', 'Controller', true);
+  controllerMode(true);
 });
 window.addEventListener('gamepaddisconnected', (e) => {
   if (e.gamepad.index !== padIndex) return;
@@ -134,7 +135,31 @@ window.addEventListener('gamepaddisconnected', (e) => {
   socket.emit('Pad', [0, 0]);
   lastPad = [0, 0];
   setPill('gp', 'No controller', false);
+  controllerMode(false);
 });
+
+// ---------- Controller mode: full screen camera + rotation lock ----------
+async function enterFullscreen() {
+  try {
+    if (!document.fullscreenElement) await document.documentElement.requestFullscreen({ navigationUI: 'hide' });
+    $('fsbtn').hidden = true;
+  } catch {
+    // Browsers need a tap first (a controller button does not count)
+    if (!document.fullscreenElement && document.fullscreenEnabled) $('fsbtn').hidden = false;
+  }
+  try { await screen.orientation.lock('landscape'); } catch { /* not supported (iOS, desktop) */ }
+}
+
+function controllerMode(on) {
+  document.body.classList.toggle('ctl', on);
+  if (on) return enterFullscreen();
+  $('fsbtn').hidden = true;
+  try { screen.orientation.unlock(); } catch {}
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+}
+
+$('fsbtn').onclick = enterFullscreen;
+$('view').addEventListener('click', () => document.body.classList.contains('ctl') && enterFullscreen());
 
 function pollPad() {
   requestAnimationFrame(pollPad);
@@ -252,6 +277,19 @@ document.addEventListener('keydown', (ev) => {
   const step = { '[': -5, ']': 5 }[ev.key];
   if (step) adjustSetting('steer_center_us', step);
 });
+
+// ---------- Keep the screen awake ----------
+let wakeLock = null;
+async function keepAwake() {
+  if (!('wakeLock' in navigator) || document.hidden || wakeLock) return;
+  try {
+    wakeLock = await navigator.wakeLock.request('screen');
+    wakeLock.addEventListener('release', () => { wakeLock = null; });
+  } catch { /* needs a tap first on some browsers */ }
+}
+keepAwake();
+document.addEventListener('visibilitychange', keepAwake);
+['pointerdown', 'keydown'].forEach((t) => document.addEventListener(t, keepAwake));
 
 // ---------- PWA ----------
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');

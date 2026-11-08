@@ -37,3 +37,12 @@ video { width: 100%; max-width: 960px; aspect-ratio: 4 / 3; background: #000; bo
 #view { position: relative; width: 100%; max-width: 960px; }
 #view video { display: block; }
 #toast { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); padding: 6px 14px; border-radius: 999px; background: rgba(0,0,0,.75); font-size: 15px; pointer-events: none; }
+
+/* Controller mode: camera fills the screen, status pills float on top */
+body.ctl main { padding: 0; }
+body.ctl #pad, body.ctl .hint, body.ctl #tuning { display: none; }
+body.ctl header { position: fixed; top: 0; left: 0; right: 0; z-index: 2; padding: 6px 10px; font-size: 12px; background: linear-gradient(rgba(0,0,0,.6), transparent); }
+body.ctl header > span:first-child, body.ctl header a { display: none; }
+body.ctl #view { position: fixed; inset: 0; max-width: none; background: #000; }
+body.ctl #view video { width: 100%; height: 100%; max-width: none; aspect-ratio: auto; border-radius: 0; }
+#fsbtn { position: absolute; left: 50%; bottom: 24px; transform: translateX(-50%); padding: 12px 20px; font-size: 16px; border: 0; border-radius: 999px; background: rgba(46,125,50,.9); color: var(--fg); }

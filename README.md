@@ -65,7 +65,9 @@ APP_PASSWORD=test CAR_TOKEN=test COOKIE_SECURE=false python server/app.py
 | Touch | ▲ ▼ | ◀ ▶ | – |
 | Game controller | RT forward, LT reverse | Left stick X | D-pad ◀▶ steering trim, ▲▼ throttle neutral trim · Y/A speed +/− · B/X steering gain +/− |
 
-Controller: Xbox, PlayStation and most USB/Bluetooth pads. Press any button once after the page opens so the browser detects it. Values are analog (-1.0 to 1.0).
+Controller: Xbox, PlayStation and most USB/Bluetooth pads. Press any button once after the page opens so the browser detects it. Values are analog (-1.0 to 1.0). When a controller connects, the camera fills the screen and the phone locks to landscape (Android; tap once if the browser asks). The screen stays awake while the page is open.
+
+Camera: `CAMERA=auto` uses a Pi camera (ribbon cable) if one is found, else the first USB webcam.
 
 ## Tuning (trim, speed, ...)
 

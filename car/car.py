@@ -7,6 +7,7 @@
 Config: environment variables (see car/.env.example).
 """
 import asyncio
+import glob
 import os
 import signal
 import time
@@ -18,8 +19,8 @@ from aiortc.contrib.media import MediaRelay
 
 SERVER_URL = os.environ.get("SERVER_URL", "http://127.0.0.1:5000")
 CAR_TOKEN = os.environ.get("CAR_TOKEN", "")
-CAMERA = os.environ.get("CAMERA", "picam")          # "picam" or "usb"
-USB_DEVICE = os.environ.get("USB_DEVICE", "/dev/video0")
+CAMERA = os.environ.get("CAMERA", "auto")           # "auto", "picam" or "usb"
+USB_DEVICE = os.environ.get("USB_DEVICE", "auto")   # "auto" = first USB webcam
 WIDTH = int(os.environ.get("VIDEO_WIDTH", "640"))
 HEIGHT = int(os.environ.get("VIDEO_HEIGHT", "480"))
 FPS = int(os.environ.get("VIDEO_FPS", "20"))
@@ -44,7 +45,7 @@ class PiCamTrack(VideoStreamTrack):
     def __init__(self):
         super().__init__()
         from picamera2 import Picamera2
-        if not Picamera2.global_camera_info():
+        if not has_csi_camera():
             raise RuntimeError("No Pi camera found (check the ribbon cable)")
         self.cam = Picamera2()
         try:
@@ -65,11 +66,38 @@ class PiCamTrack(VideoStreamTrack):
         return frame
 
 
+def has_csi_camera():
+    """True if a ribbon-cable camera is found (libcamera also lists USB webcams)."""
+    try:
+        from picamera2 import Picamera2
+        return any("usb" not in c.get("Id", "") for c in Picamera2.global_camera_info())
+    except Exception:
+        return False
+
+
+def find_usb_camera():
+    if USB_DEVICE != "auto":
+        return USB_DEVICE
+    found = sorted(glob.glob("/dev/v4l/by-id/*-video-index0"))
+    if not found:
+        raise RuntimeError("No USB webcam found")
+    return found[0]
+
+
 def make_track():
-    if CAMERA == "usb":
+    use_usb = CAMERA == "usb" or (CAMERA == "auto" and not has_csi_camera())
+    if use_usb:
         from aiortc.contrib.media import MediaPlayer
-        return MediaPlayer(USB_DEVICE, format="v4l2", options={
-            "video_size": f"{WIDTH}x{HEIGHT}", "framerate": str(FPS)}).video
+        dev = find_usb_camera()
+        print(f"USB camera: {dev}")
+        # MJPEG gives full frame rate on most webcams (raw YUYV is often 5 fps)
+        player = MediaPlayer(dev, format="v4l2", options={
+            "input_format": "mjpeg", "video_size": f"{WIDTH}x{HEIGHT}",
+            "framerate": str(FPS)})
+        if player.video is None:
+            raise RuntimeError(f"No video from {dev}")
+        return player.video
+    print("Pi camera (CSI)")
     return PiCamTrack()
 
 
