@@ -170,33 +170,6 @@ function pollPad() {
   }
 }
 requestAnimationFrame(pollPad);
-  if (padIndex === null) return;
-  const gp = navigator.getGamepads()[padIndex];
-  if (!gp) return;
-
-  const rt = gp.buttons[7] ? gp.buttons[7].value : 0;
-  const lt = gp.buttons[6] ? gp.buttons[6].value : 0;
-  let throttle = rt - lt;
-  if (Math.abs(throttle) < 0.05) throttle = -dz(gp.axes[1] || 0);
-  const steering = dz(gp.axes[0] || 0);
-  const v = [r2(throttle), r2(steering)];
-
-  // Send on change (max 30/s), and resend every 100 ms so state is never stale
-  const now = performance.now();
-  const changed = v[0] !== lastPad[0] || v[1] !== lastPad[1];
-  if ((changed && now - lastPadSent > 33) || now - lastPadSent > 100) {
-    socket.emit('Pad', v);
-    lastPad = v;
-    lastPadSent = now;
-  }
-
-  for (const [i, key] of Object.entries(PAD_BUTTONS)) {
-    const down = gp.buttons[i] && gp.buttons[i].pressed;
-    if (down && !padHeld.has(key)) { padHeld.add(key); press(key, 'keydown'); }
-    if (!down && padHeld.has(key)) { padHeld.delete(key); press(key, 'keyup'); }
-  }
-}
-requestAnimationFrame(pollPad);
 
 // Stop if the page loses focus (keyup events would be lost)
 function stopAll() { held.clear(); send('Stop'); }

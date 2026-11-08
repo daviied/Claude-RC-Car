@@ -63,7 +63,7 @@ APP_PASSWORD=test CAR_TOKEN=test COOKIE_SECURE=false python server/app.py
 |---|---|---|---|
 | Keyboard | W/S or ↑/↓ | A/D or ←/→ | Q E G H |
 | Touch | ▲ ▼ | ◀ ▶ | – |
-| Game controller | RT forward, LT reverse (or left stick Y) | Left stick X | A B X Y = Q E G H |
+| Game controller | RT forward, LT reverse | Left stick X | D-pad ◀▶ steering trim, ▲▼ throttle neutral trim · Y/A speed +/− · B/X steering gain +/− |
 
 Controller: Xbox, PlayStation and most USB/Bluetooth pads. Press any button once after the page opens so the browser detects it. Values are analog (-1.0 to 1.0).
 
