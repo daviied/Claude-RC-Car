@@ -37,6 +37,7 @@ turn = 0
 pad_speed = 0.0  # game controller: -1.0 .. 1.0
 pad_turn = 0.0
 car_sid = None
+phonecam_sid = None  # phone browser that streams a USB webcam (/camera page)
 failed_logins = {}  # ip -> (count, first_fail_time)
 last_pwm = None
 
@@ -55,6 +56,7 @@ SETTINGS_SPEC = {
     "steer_invert":          ("Reverse steering",       False, None, None, None),
     "pwm_min_us":            ("PWM min limit (us)",      1000,  500, 1500, 10),
     "pwm_max_us":            ("PWM max limit (us)",      2000, 1500, 2500, 10),
+    "video_from_phone":      ("Video from phone camera (/camera)", False, None, None, None),
 }
 settings = {k: v[1] for k, v in SETTINGS_SPEC.items()}
 _save_timer = None
@@ -192,6 +194,12 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/camera")
+@login_required
+def camera():
+    return render_template("camera.html")
+
+
 @app.route("/sw.js")
 def service_worker():
     return send_from_directory(app.static_folder, "sw.js", mimetype="application/javascript")
@@ -224,33 +232,67 @@ def send_failsafe():
         socketio.emit("pwm_failsafe", failsafe_pwm(), to=car_sid)
 
 
+def video_sid():
+    """Socket of the active video source (car or phone camera)."""
+    return phonecam_sid if settings["video_from_phone"] else car_sid
+
+
+def video_status():
+    return {"source": "phone" if settings["video_from_phone"] else "car",
+            "online": video_sid() is not None}
+
+
+def is_source(sid):
+    return sid is not None and sid in (car_sid, phonecam_sid)
+
+
 @socketio.on("connect")
 def on_connect(auth):
-    global car_sid
+    global car_sid, phonecam_sid
     if auth and auth.get("role") == "car":
         if not hmac.compare_digest(str(auth.get("token", "")), CAR_TOKEN):
             return False
         car_sid = request.sid
         print("Car connected")
         socketio.emit("car_status", True)
+        socketio.emit("video_status", video_status())
         emit("pwm_failsafe", failsafe_pwm())
+        if settings["video_from_phone"]:
+            emit("video_stop")
         return
     if not session.get("auth"):
         return False  # reject unauthenticated browsers
+    if auth and auth.get("role") == "phonecam":
+        if phonecam_sid:
+            socketio.emit("replaced", to=phonecam_sid)  # only one phone camera
+        phonecam_sid = request.sid
+        print("Phone camera connected")
+        socketio.emit("video_status", video_status())
+        return
     print("Browser connected")
     emit("car_status", car_sid is not None)
+    emit("video_status", video_status())
     emit("settings", settings_payload())
     emit("pwm_out", last_pwm or failsafe_pwm())
 
 
 @socketio.on("disconnect")
 def on_disconnect(reason=None):
-    global car_sid, speed, turn, pad_speed, pad_turn
+    global car_sid, phonecam_sid, speed, turn, pad_speed, pad_turn
     if request.sid == car_sid:
         car_sid = None
         print("Car disconnected:", reason)
         socketio.emit("car_status", False)
+        socketio.emit("video_status", video_status())
+    elif request.sid == phonecam_sid:
+        phonecam_sid = None
+        print("Phone camera disconnected:", reason)
+        socketio.emit("video_status", video_status())
     else:
+        # Video sources stop sending to this browser
+        for sid in (car_sid, phonecam_sid):
+            if sid:
+                socketio.emit("viewer_left", request.sid, to=sid)
         # Driver left: stop the car
         speed = turn = 0
         pad_speed = pad_turn = 0.0
@@ -270,26 +312,37 @@ def get_ice():
 
 @socketio.on("webrtc_offer")
 def webrtc_offer(data):
-    if request.sid == car_sid:
+    if is_source(request.sid):
         return
-    if car_sid is None:
-        emit("webrtc_error", "Car not connected")
+    target = video_sid()
+    if target is None:
+        emit("webrtc_error", "phone camera offline" if settings["video_from_phone"] else "car offline")
         return
     socketio.emit("webrtc_offer",
-                  {"sid": request.sid, "sdp": data["sdp"], "type": data["type"]}, to=car_sid)
+                  {"sid": request.sid, "sdp": data["sdp"], "type": data["type"]}, to=target)
 
 
 @socketio.on("webrtc_answer")
 def webrtc_answer(data):
-    if request.sid != car_sid:
+    # Only the active source may answer (a late answer from the other one is dropped)
+    if request.sid != video_sid():
         return
     socketio.emit("webrtc_answer", {"sdp": data["sdp"], "type": data["type"]}, to=data["sid"])
 
 
+def video_source_changed():
+    """Stop the old source (saves hotspot data) and make viewers reconnect."""
+    old = car_sid if settings["video_from_phone"] else phonecam_sid
+    if old:
+        socketio.emit("video_stop", to=old)
+    socketio.emit("video_status", video_status())
+
+
 @socketio.on("set_setting")
 def set_setting(data):
-    if request.sid == car_sid:
+    if is_source(request.sid):
         return
+    old_source = settings["video_from_phone"]
     try:
         key = data["key"]
         if key not in SETTINGS_SPEC:
@@ -301,17 +354,22 @@ def set_setting(data):
         settings["pwm_min_us"], settings["pwm_max_us"] = settings["pwm_max_us"], settings["pwm_min_us"]
     save_settings()
     socketio.emit("settings", settings_payload())
+    if settings["video_from_phone"] != old_source:
+        video_source_changed()
     send_failsafe()
     send_update()
 
 
 @socketio.on("reset_settings")
 def reset_settings():
-    if request.sid == car_sid:
+    if is_source(request.sid):
         return
+    old_source = settings["video_from_phone"]
     settings.update({k: v[1] for k, v in SETTINGS_SPEC.items()})
     save_settings()
     socketio.emit("settings", settings_payload())
+    if settings["video_from_phone"] != old_source:
+        video_source_changed()
     send_failsafe()
     send_update()
 
@@ -320,7 +378,7 @@ def reset_settings():
 def Pad(data):
     """Analog game controller input: [throttle, steering], each -1.0 .. 1.0."""
     global pad_speed, pad_turn
-    if request.sid == car_sid:
+    if is_source(request.sid):
         return
     try:
         pad_speed, pad_turn = clamp(float(data[0])), clamp(float(data[1]))
@@ -332,7 +390,7 @@ def Pad(data):
 @socketio.on("Key_Press")
 def Key_Press(arg):
     global speed, turn, pad_speed, pad_turn
-    if request.sid == car_sid:
+    if is_source(request.sid):
         return
     match arg:
         case "W_Down" | "S_Up":

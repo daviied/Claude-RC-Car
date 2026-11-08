@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111111">
+  <title>Claude RC Car - Phone camera</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="{{ url_for('static', filename='icon.svg') }}" type="image/svg+xml">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" integrity="sha384-2huaZvOR9iDzHqslqwpR87isEmrfxqyWOF7hr7BY6KG0+hVKLoEXMPUJw3ynWuhO" crossorigin="anonymous"></script>
+</head>
+<body>
+  <header>
+    <span>Phone camera</span>
+    <span id="srv" class="pill off">Server: offline</span>
+    <span id="mode" class="pill off">Not selected</span>
+    <span id="viewers" class="pill">0 viewers</span>
+    <a href="/">Drive</a>
+  </header>
+
+  <main>
+    <div class="camform">
+      <label>Camera <select id="camsel"></select></label>
+      <label>Quality
+        <select id="quality">
+          <option value="480">640x480, 1 Mbps</option>
+          <option value="720" selected>1280x720, 2.5 Mbps</option>
+          <option value="1080">1920x1080, 4 Mbps</option>
+        </select>
+      </label>
+    </div>
+    <div id="view">
+      <video id="cam" autoplay playsinline muted></video>
+    </div>
+    <p id="msg" class="hint"></p>
+    <p class="hint camhelp">Keep this page open on the phone on the car. Plug the webcam into the phone with a USB cable.
+      Turn on "Video from phone camera" in Tuning on the drive page. Video then uses the phone's own data, not the hotspot.</p>
+  </main>
+
+  <script src="{{ url_for('static', filename='camera.js') }}"></script>
+</body>
+</html>

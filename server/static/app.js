@@ -17,9 +17,11 @@ async function startVideo() {
   pc = new RTCPeerConnection({ iceServers });
   pc.addTransceiver('video', { direction: 'recvonly' });
   pc.ontrack = (e) => { $('cam').srcObject = e.streams[0] || new MediaStream([e.track]); };
+  const me = pc;
   pc.onconnectionstatechange = () => {
+    if (pc !== me) return; // an old connection
     const s = pc.connectionState;
-    setPill('video', 'Video: ' + s, s === 'connected');
+    setPill('video', `Video (${videoSrc}): ${s}`, s === 'connected');
     if (s === 'failed') setTimeout(startVideo, 3000);
   };
 
@@ -37,7 +39,15 @@ socket.on('webrtc_answer', (d) => pc && pc.setRemoteDescription(d));
 socket.on('webrtc_error', (msg) => setPill('video', 'Video: ' + msg, false));
 socket.on('car_status', (online) => {
   setPill('car', online ? 'Car online' : 'Car offline', online);
-  if (online) startVideo();
+});
+// Video comes from the car or from the phone camera page (Tuning setting)
+let videoSrc = 'car';
+socket.on('video_status', ({ source, online }) => {
+  videoSrc = source;
+  if (online) return startVideo();
+  if (pc) { pc.close(); pc = null; }
+  $('cam').srcObject = null;
+  setPill('video', `Video: ${source === 'phone' ? 'phone camera' : 'car'} offline`, false);
 });
 socket.on('connect_error', (err) => {
   if (/rejected/i.test(err.message)) location.href = '/login'; // session expired

@@ -320,6 +320,20 @@ async def on_offer(data):
             await close_pc(sid)
 
 
+@sio.on("video_stop")
+async def on_video_stop(data=None):
+    """Server switched video to the phone camera: stop sending (saves data)."""
+    if pcs:
+        print("Video stopped by server")
+    for sid in list(pcs):
+        await close_pc(sid)
+
+
+@sio.on("viewer_left")
+async def on_viewer_left(sid):
+    await close_pc(sid)
+
+
 async def close_pc(sid):
     pc = pcs.pop(sid, None)
     if pc is not None:

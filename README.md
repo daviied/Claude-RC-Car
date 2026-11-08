@@ -69,6 +69,14 @@ Controller: Xbox, PlayStation and most USB/Bluetooth pads. Press any button once
 
 Camera: `CAMERA=auto` uses a Pi camera (ribbon cable) if one is found, else the first USB webcam.
 
+### Phone camera (saves hotspot data)
+
+Video can come from a phone on the car instead of the Pi. The video then uses the phone's own data, not the hotspot.
+
+1. Plug a USB webcam into the phone (USB-C / OTG). Android 14+ with Chrome works on most phones. iPhones do not support USB webcams in the browser.
+2. On that phone, open `https://<your server>/camera`, log in, and allow camera access. Pick the camera and quality. Keep the page open (the screen stays on).
+3. On the drive page, open Tuning and turn on **Video from phone camera**. The car stops sending video. Turn it off to use the car camera again.
+
 ## Tuning (trim, speed, ...)
 
 Open **Tuning** under the video on the website. The server does all the math and sends the Pi only the PWM pulse widths, so changes work at once with no restart on the Pi. Settings are saved in the `claude-rc-car-data` Docker volume.
