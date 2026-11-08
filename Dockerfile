@@ -5,8 +5,10 @@ COPY server/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY server/ .
 
-RUN useradd -r -u 10001 app
+RUN useradd -r -u 10001 app && mkdir -p /data && chown app /data
 USER app
+ENV DATA_DIR=/data
+VOLUME /data
 
 EXPOSE 5000
 # One worker (Socket.IO state lives in memory), many threads for WebSockets

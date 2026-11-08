@@ -4,14 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#111111">
-  <title>RC Car - Log in</title>
+  <title>Claude RC Car - Log in</title>
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="{{ url_for('static', filename='icon.svg') }}" type="image/svg+xml">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body class="center">
   <form method="post" class="login">
-    <h1>RC Car</h1>
+    <h1>Claude RC Car</h1>
     {% if error %}<p class="error">{{ error }}</p>{% endif %}
     <input type="password" name="password" placeholder="Password" autocomplete="current-password" required autofocus>
     <button type="submit">Log in</button>

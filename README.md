@@ -1,4 +1,4 @@
-# RC Car over 4G LTE
+# Claude-RC-Car
 
 Drive an RC car from a browser. Controls go over Socket.IO. Camera video goes over WebRTC.
 
@@ -18,8 +18,8 @@ Browser ──Socket.IO (controls + signaling)──► Server (Docker) ◄─�
 
 ## Server setup
 
-1. Push this repo to GitHub. The workflow builds `ghcr.io/daviied/rc-car` (amd64 + arm64).
-2. In GitHub → Packages → `rc-car` → set visibility to public (or log in to ghcr on the host).
+1. Push this repo to GitHub. The workflow builds `ghcr.io/daviied/claude-rc-car` (amd64 + arm64).
+2. In GitHub → Packages → `claude-rc-car` → set visibility to public (or log in to ghcr on the host).
 3. In CasaOS, import `docker-compose.yml`. Set every value from `.env.example`.
 4. nginx reverse proxy → `http://HOST:5000`, with WebSocket support:
    ```nginx
@@ -38,20 +38,17 @@ Browser ──Socket.IO (controls + signaling)──► Server (Docker) ◄─�
    - `3478` UDP + TCP
    - `49160-49200` UDP
 
-## Pi setup
+## Pi setup (Ubuntu Server 26.10 on Pi 4)
 
 ```bash
-sudo apt install -y python3-picamera2 libavdevice-dev libavfilter-dev libopus-dev libvpx-dev libsrtp2-dev
-git clone https://github.com/daviied/rc-car.git ~/Rc-Car
-python3 -m venv --system-site-packages ~/rc
-~/rc/bin/pip install -r ~/Rc-Car/car/requirements.txt
-cp ~/Rc-Car/car/.env.example ~/Rc-Car/car/.env   # then edit it
-sudo cp ~/Rc-Car/car/rc-car.service /etc/systemd/system/
-sudo systemctl enable --now rc-car
-journalctl -u rc-car -f
+git clone https://github.com/daviied/Claude-RC-Car.git ~/Claude-RC-Car
+cd ~/Claude-RC-Car/car
+cp .env.example .env   # then edit SERVER_URL and CAR_TOKEN
+sudo ./install.sh      # installs apt packages + boot service, starts it
+journalctl -u claude-rc-car -f
 ```
 
-Write your motor/servo code in `apply_controls()` in `car/car.py`.
+The program starts at boot and restarts if it crashes. Write your motor/servo code in `apply_controls()` in `car/car.py`.
 
 ## Local test (no Docker)
 
@@ -69,6 +66,20 @@ APP_PASSWORD=test CAR_TOKEN=test COOKIE_SECURE=false python server/app.py
 | Game controller | RT forward, LT reverse (or left stick Y) | Left stick X | A B X Y = Q E G H |
 
 Controller: Xbox, PlayStation and most USB/Bluetooth pads. Press any button once after the page opens so the browser detects it. Values are analog (-1.0 to 1.0).
+
+## Tuning (trim, speed, ...)
+
+Open **Tuning** under the video on the website. The server does all the math and sends the Pi only the PWM pulse widths, so changes work at once with no restart on the Pi. Settings are saved in the `claude-rc-car-data` Docker volume.
+
+| Setting | What it does |
+|---|---|
+| Speed (max power) | Throttle gain, 0–1. Start at 0.5 |
+| Throttle neutral | ESC stop pulse (1500 µs). Change it if the motor creeps |
+| Forward / reverse range | µs from neutral at full throttle |
+| Steering trim / center | Servo center. `[` and `]` keys change it in 5 µs steps |
+| Steering range / gain | How far the wheels turn |
+| Reverse throttle / steering | Change direction |
+| PWM min / max limit | Server-side clamp. The Pi also clamps to `PWM_MIN_US`/`PWM_MAX_US` in `car/.env` |
 
 ## Safety
 

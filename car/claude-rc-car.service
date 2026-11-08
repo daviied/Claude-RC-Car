@@ -1,0 +1,22 @@
+[Unit]
+Description=Claude-RC-Car client
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Change User and paths to match your Pi
+User=david
+WorkingDirectory=/home/david/Claude-RC-Car/car
+EnvironmentFile=/home/david/Claude-RC-Car/car/.env
+ExecStart=/usr/bin/python3 -u car.py
+Restart=always
+RestartSec=5
+
+# Keep the Pi responsive (SSH stays usable) even if video encoding overloads:
+Nice=10
+CPUQuota=300%
+MemoryHigh=600M
+MemoryMax=800M
+
+[Install]
+WantedBy=multi-user.target

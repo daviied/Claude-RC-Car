@@ -1,7 +1,9 @@
 import base64
 import hashlib
 import hmac
+import json
 import os
+import threading
 import time
 from functools import wraps
 
@@ -15,6 +17,8 @@ CAR_TOKEN = os.environ.get("CAR_TOKEN", "")
 TURN_SECRET = os.environ.get("TURN_SECRET", "")
 TURN_HOST = os.environ.get("TURN_HOST", "")
 STUN_URL = os.environ.get("STUN_URL", "stun:stun.l.google.com:19302")
+DATA_DIR = os.environ.get("DATA_DIR", "/data")
+SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
 
 if not APP_PASSWORD or not CAR_TOKEN:
     raise SystemExit("APP_PASSWORD and CAR_TOKEN must be set")
@@ -34,6 +38,99 @@ pad_speed = 0.0  # game controller: -1.0 .. 1.0
 pad_turn = 0.0
 car_sid = None
 failed_logins = {}  # ip -> (count, first_fail_time)
+last_pwm = None
+
+
+# ---- Tuning settings (server does all the math, the Pi only outputs PWM) ----
+# key: (label, default, min, max, step). bool settings use min=max=None.
+SETTINGS_SPEC = {
+    "throttle_gain":         ("Speed (max power)",        0.5,  0.0, 1.0,  0.05),
+    "throttle_neutral_us":   ("Throttle neutral (us)",   1500, 1000, 2000, 5),
+    "throttle_fwd_range_us": ("Forward range (us)",       500,    0, 1000, 10),
+    "throttle_rev_range_us": ("Reverse range (us)",       500,    0, 1000, 10),
+    "throttle_invert":       ("Reverse throttle",       False, None, None, None),
+    "steer_center_us":       ("Steering trim / center (us)", 1500, 1000, 2000, 5),
+    "steer_range_us":        ("Steering range (us)",      400,    0, 1000, 10),
+    "steer_gain":            ("Steering gain",            1.0,  0.0, 1.0,  0.05),
+    "steer_invert":          ("Reverse steering",       False, None, None, None),
+    "pwm_min_us":            ("PWM min limit (us)",      1000,  500, 1500, 10),
+    "pwm_max_us":            ("PWM max limit (us)",      2000, 1500, 2500, 10),
+}
+settings = {k: v[1] for k, v in SETTINGS_SPEC.items()}
+_save_timer = None
+
+
+def load_settings():
+    try:
+        with open(SETTINGS_FILE) as f:
+            for k, v in json.load(f).items():
+                if k in SETTINGS_SPEC:
+                    settings[k] = validate_setting(k, v)
+        print("Settings loaded from", SETTINGS_FILE)
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        print("Settings load failed, using defaults:", repr(e))
+
+
+def save_settings_now():
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        tmp = SETTINGS_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(settings, f, indent=2)
+        os.replace(tmp, SETTINGS_FILE)
+    except Exception as e:
+        print("Settings save failed (kept in memory):", repr(e))
+
+
+def save_settings():
+    """Save 1 s after the last change, so slider drags do not write every step."""
+    global _save_timer
+    if _save_timer:
+        _save_timer.cancel()
+    _save_timer = threading.Timer(1.0, save_settings_now)
+    _save_timer.daemon = True
+    _save_timer.start()
+
+
+def validate_setting(key, value):
+    label, default, lo, hi, step = SETTINGS_SPEC[key]
+    if isinstance(default, bool):
+        return bool(value)
+    v = float(value)
+    if v != v:  # NaN
+        raise ValueError("NaN")
+    v = max(lo, min(hi, v))
+    return int(round(v)) if isinstance(default, int) else round(v, 3)
+
+
+def settings_payload():
+    return [{"key": k, "label": spec[0], "value": settings[k], "default": spec[1],
+             "min": spec[2], "max": spec[3], "step": spec[4]}
+            for k, spec in SETTINGS_SPEC.items()]
+
+
+def compute_pwm(t, s):
+    """Throttle/steering -1..1 -> [throttle_us, steering_us]."""
+    c = settings
+    if c["throttle_invert"]:
+        t = -t
+    if c["steer_invert"]:
+        s = -s
+    t *= c["throttle_gain"]
+    s *= c["steer_gain"]
+    thr = c["throttle_neutral_us"] + t * (c["throttle_fwd_range_us"] if t > 0 else c["throttle_rev_range_us"])
+    st = c["steer_center_us"] + s * c["steer_range_us"]
+    lo, hi = c["pwm_min_us"], c["pwm_max_us"]
+    return [int(round(max(lo, min(hi, thr)))), int(round(max(lo, min(hi, st))))]
+
+
+def failsafe_pwm():
+    return compute_pwm(0.0, 0.0)
+
+
+load_settings()
 
 
 def login_required(f):
@@ -112,10 +209,19 @@ def clamp(v):
 
 
 def send_update():
-    # Keyboard and controller add together, then clamp to -1..1
+    # Keyboard and controller add together, clamp to -1..1, then map to PWM
+    global last_pwm
+    pwm = compute_pwm(clamp(speed + pad_speed), clamp(turn + pad_turn))
     if car_sid:
-        socketio.emit("Update", [round(clamp(speed + pad_speed), 3),
-                                 round(clamp(turn + pad_turn), 3)], to=car_sid)
+        socketio.emit("PWM", pwm, to=car_sid)
+    if pwm != last_pwm:
+        last_pwm = pwm
+        socketio.emit("pwm_out", pwm)  # live display in the browser
+
+
+def send_failsafe():
+    if car_sid:
+        socketio.emit("pwm_failsafe", failsafe_pwm(), to=car_sid)
 
 
 @socketio.on("connect")
@@ -127,11 +233,14 @@ def on_connect(auth):
         car_sid = request.sid
         print("Car connected")
         socketio.emit("car_status", True)
+        emit("pwm_failsafe", failsafe_pwm())
         return
     if not session.get("auth"):
         return False  # reject unauthenticated browsers
     print("Browser connected")
     emit("car_status", car_sid is not None)
+    emit("settings", settings_payload())
+    emit("pwm_out", last_pwm or failsafe_pwm())
 
 
 @socketio.on("disconnect")
@@ -175,6 +284,36 @@ def webrtc_answer(data):
     if request.sid != car_sid:
         return
     socketio.emit("webrtc_answer", {"sdp": data["sdp"], "type": data["type"]}, to=data["sid"])
+
+
+@socketio.on("set_setting")
+def set_setting(data):
+    if request.sid == car_sid:
+        return
+    try:
+        key = data["key"]
+        if key not in SETTINGS_SPEC:
+            return
+        settings[key] = validate_setting(key, data["value"])
+    except (TypeError, ValueError, KeyError):
+        return
+    if settings["pwm_min_us"] > settings["pwm_max_us"]:
+        settings["pwm_min_us"], settings["pwm_max_us"] = settings["pwm_max_us"], settings["pwm_min_us"]
+    save_settings()
+    socketio.emit("settings", settings_payload())
+    send_failsafe()
+    send_update()
+
+
+@socketio.on("reset_settings")
+def reset_settings():
+    if request.sid == car_sid:
+        return
+    settings.update({k: v[1] for k, v in SETTINGS_SPEC.items()})
+    save_settings()
+    socketio.emit("settings", settings_payload())
+    send_failsafe()
+    send_update()
 
 
 @socketio.on("Pad")

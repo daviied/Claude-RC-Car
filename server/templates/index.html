@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
   <meta name="theme-color" content="#111111">
-  <title>RC Car</title>
+  <title>Claude RC Car</title>
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="{{ url_for('static', filename='icon.svg') }}" type="image/svg+xml">
   <link rel="apple-touch-icon" href="{{ url_for('static', filename='icon.svg') }}">
@@ -13,7 +13,7 @@
 </head>
 <body>
   <header>
-    <span>RC Car</span>
+    <span>Claude RC Car</span>
     <span id="car" class="pill off">Car offline</span>
     <span id="video" class="pill off">Video: idle</span>
     <span id="gp" class="pill off">No controller</span>
@@ -22,7 +22,10 @@
   </header>
 
   <main>
-    <video id="cam" autoplay playsinline muted></video>
+    <div id="view">
+      <video id="cam" autoplay playsinline muted></video>
+      <div id="toast" hidden></div>
+    </div>
 
     <div id="pad">
       <button data-key="w" style="grid-area:up">▲</button>
@@ -30,7 +33,13 @@
       <button data-key="s" style="grid-area:down">▼</button>
       <button data-key="d" style="grid-area:right">▶</button>
     </div>
-    <p class="hint">Keyboard: W A S D or arrow keys · Controller: RT/LT throttle, left stick steer (press a button to connect)</p>
+    <p class="hint">Keyboard: W A S D or arrow keys · [ ] steering trim · Controller: RT/LT throttle, left stick steer, D-pad trim, Y/A speed, B/X steering gain (press a button to connect)</p>
+
+    <details id="tuning">
+      <summary>Tuning <span id="pwm" class="pill">PWM -- / --</span></summary>
+      <div id="settings"></div>
+      <button id="reset" type="button">Reset to defaults</button>
+    </details>
   </main>
 
   <script src="{{ url_for('static', filename='app.js') }}"></script>

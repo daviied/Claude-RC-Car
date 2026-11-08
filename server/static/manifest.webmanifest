@@ -1,6 +1,6 @@
 {
-  "name": "RC Car",
-  "short_name": "RC Car",
+  "name": "Claude RC Car",
+  "short_name": "Claude RC Car",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

@@ -84,6 +84,7 @@ function press(key, type) {
 
 ['keydown', 'keyup'].forEach((t) =>
   document.addEventListener(t, (ev) => {
+    if (t === 'keydown' && ev.target.tagName === 'INPUT') return; // typing in tuning fields
     const key = ev.key.length === 1 ? ev.key.toLowerCase() : ev.key;
     if (key in keyAction) ev.preventDefault();
     press(key, t);
@@ -99,11 +100,23 @@ document.querySelectorAll('#pad button').forEach((btn) => {
 });
 
 // ---------- Game controller (Gamepad API, "standard" layout) ----------
-// RT = forward, LT = reverse (analog). Left stick Y also works for throttle.
-// Left stick X = steering. A/B/X/Y = Q/E/G/H actions.
+// RT = forward, LT = reverse (analog). Left stick X = steering.
+// D-pad left/right = steering trim, up/down = throttle neutral trim.
+// Y/A = speed (throttle gain) up/down, B/X = steering gain up/down.
 const DEADZONE = 0.12;
-const PAD_BUTTONS = { 0: 'q', 1: 'e', 2: 'g', 3: 'h' };
-const padHeld = new Set();
+const REPEAT_DELAY = 400;   // ms before a held button repeats
+const REPEAT_EVERY = 120;   // ms between repeats
+const PAD_TUNE = {
+  14: ['steer_center_us', -5],      // D-pad left
+  15: ['steer_center_us', +5],      // D-pad right
+  12: ['throttle_neutral_us', +5],  // D-pad up
+  13: ['throttle_neutral_us', -5],  // D-pad down
+  3:  ['throttle_gain', +0.05],     // Y
+  0:  ['throttle_gain', -0.05],     // A
+  1:  ['steer_gain', +0.05],        // B
+  2:  ['steer_gain', -0.05],        // X
+};
+const padDownAt = {};       // button index -> time of last action
 let padIndex = null;
 let lastPad = [0, 0];
 let lastPadSent = 0;
@@ -118,8 +131,6 @@ window.addEventListener('gamepadconnected', (e) => {
 window.addEventListener('gamepaddisconnected', (e) => {
   if (e.gamepad.index !== padIndex) return;
   padIndex = null;
-  padHeld.forEach((k) => press(k, 'keyup'));
-  padHeld.clear();
   socket.emit('Pad', [0, 0]);
   lastPad = [0, 0];
   setPill('gp', 'No controller', false);
@@ -127,6 +138,38 @@ window.addEventListener('gamepaddisconnected', (e) => {
 
 function pollPad() {
   requestAnimationFrame(pollPad);
+  if (padIndex === null) return;
+  const gp = navigator.getGamepads()[padIndex];
+  if (!gp) return;
+
+  const btn = (i) => gp.buttons[i] || { value: 0, pressed: false };
+  const throttle = btn(7).value - btn(6).value;   // triggers only
+  const steering = dz(gp.axes[0] || 0);
+  const v = [r2(throttle), r2(steering)];
+
+  // Send on change (max 30/s), and resend every 100 ms so state is never stale
+  const now = performance.now();
+  const changed = v[0] !== lastPad[0] || v[1] !== lastPad[1];
+  if ((changed && now - lastPadSent > 33) || now - lastPadSent > 100) {
+    socket.emit('Pad', v);
+    lastPad = v;
+    lastPadSent = now;
+  }
+
+  // Tuning buttons: act on press, repeat while held
+  for (const [i, [key, delta]] of Object.entries(PAD_TUNE)) {
+    if (!btn(i).pressed) { delete padDownAt[i]; continue; }
+    const t = padDownAt[i];
+    if (t === undefined) {
+      adjustSetting(key, delta);
+      padDownAt[i] = now + REPEAT_DELAY - REPEAT_EVERY;
+    } else if (now - t >= REPEAT_EVERY) {
+      adjustSetting(key, delta);
+      padDownAt[i] = now;
+    }
+  }
+}
+requestAnimationFrame(pollPad);
   if (padIndex === null) return;
   const gp = navigator.getGamepads()[padIndex];
   if (!gp) return;
@@ -171,6 +214,71 @@ setInterval(async () => {
 }, 1000);
 // Heartbeat: keeps the car failsafe alive (car stops after 0.5 s without one)
 setInterval(() => socket.connected && send('Heartbeat'), 200);
+
+// ---------- Tuning (stored on the server) ----------
+let settings = {};
+
+socket.on('pwm_out', (v) => { $('pwm').textContent = `PWM ${v[0]} / ${v[1]} us`; });
+
+socket.on('settings', (list) => {
+  const box = $('settings');
+  list.forEach((s) => {
+    settings[s.key] = s;
+    let row = document.getElementById('row-' + s.key);
+    if (!row) {
+      row = document.createElement('label');
+      row.id = 'row-' + s.key;
+      row.className = 'setting';
+      const name = document.createElement('span');
+      name.textContent = s.label;
+      row.appendChild(name);
+      if (typeof s.value === 'boolean') {
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.onchange = () => socket.emit('set_setting', { key: s.key, value: cb.checked });
+        row.appendChild(cb);
+      } else {
+        const range = document.createElement('input');
+        const num = document.createElement('input');
+        range.type = 'range'; num.type = 'number';
+        [range, num].forEach((el) => { el.min = s.min; el.max = s.max; el.step = s.step; });
+        range.oninput = () => { num.value = range.value; socket.emit('set_setting', { key: s.key, value: +range.value }); };
+        num.onchange = () => socket.emit('set_setting', { key: s.key, value: +num.value });
+        row.append(range, num);
+      }
+      box.appendChild(row);
+    }
+    // Do not overwrite a control the user is using right now
+    row.querySelectorAll('input').forEach((el) => {
+      if (document.activeElement === el && el.type !== 'range') return;
+      if (el.type === 'checkbox') el.checked = s.value; else el.value = s.value;
+    });
+  });
+});
+
+$('reset').onclick = () => { if (confirm('Reset all tuning to defaults?')) socket.emit('reset_settings'); };
+
+// Change a setting by a step (server clamps it) and show the new value
+let toastTimer;
+function adjustSetting(key, delta) {
+  const s = settings[key];
+  if (!s) return;
+  const v = Math.round((s.value + delta) * 1000) / 1000;
+  s.value = Math.max(s.min, Math.min(s.max, v));  // so held repeats keep counting
+  socket.emit('set_setting', { key, value: s.value });
+  const t = $('toast');
+  t.textContent = `${s.label}: ${s.value}`;
+  t.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.hidden = true; }, 1500);
+}
+
+// [ and ] keys: steering trim in 5 us steps
+document.addEventListener('keydown', (ev) => {
+  if (ev.target.tagName === 'INPUT' || !settings.steer_center_us) return;
+  const step = { '[': -5, ']': 5 }[ev.key];
+  if (step) adjustSetting('steer_center_us', step);
+});
 
 // ---------- PWA ----------
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');
