@@ -69,6 +69,8 @@ Controller: Xbox, PlayStation and most USB/Bluetooth pads. Press any button once
 
 Camera: `CAMERA=auto` uses a Pi camera (ribbon cable) if one is found, else the first USB webcam.
 
+Video quality: pick a preset in the **Video quality** dropdown under the video (Data saver 240p / 0.25 Mbps up to Max 1080p / 4 Mbps; each shows its data use per hour). It applies to the car camera and the phone camera. The car caps resolution at `VIDEO_MAX_HEIGHT` (default 720), because the Pi 4 encodes video in software.
+
 ### Phone camera (saves hotspot data)
 
 Video can come from a phone on the car instead of the Pi. The video then uses the phone's own data, not the hotspot.

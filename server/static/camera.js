@@ -2,11 +2,8 @@
 // drive page over WebRTC. Video uses the phone's own data, not the car's hotspot.
 const socket = io({ auth: { role: 'phonecam' } });
 const $ = (id) => document.getElementById(id);
-const QUALITY = {
-  480: { width: 640, height: 480, bitrate: 1_000_000 },
-  720: { width: 1280, height: 720, bitrate: 2_500_000 },
-  1080: { width: 1920, height: 1080, bitrate: 4_000_000 },
-};
+// Quality preset from the server (drive page dropdown)
+let quality = { name: 'Medium', width: 640, height: 480, fps: 30, bitrate: 1_200_000 };
 const peers = new Map(); // viewer socket id -> RTCPeerConnection
 let stream = null;
 
@@ -38,12 +35,12 @@ async function listCameras() {
 }
 
 async function startCamera() {
-  const q = QUALITY[$('quality').value];
+  const q = quality;
   const id = $('camsel').value;
   try {
     const s = await navigator.mediaDevices.getUserMedia({
       audio: false,
-      video: { deviceId: id ? { exact: id } : undefined, width: { ideal: q.width }, height: { ideal: q.height }, frameRate: { ideal: 30 } },
+      video: { deviceId: id ? { exact: id } : undefined, width: { ideal: q.width }, height: { ideal: q.height }, frameRate: { ideal: q.fps } },
     });
     if (stream) stream.getTracks().forEach((t) => t.stop());
     stream = s;
@@ -70,7 +67,7 @@ async function restartCamera() {
 }
 
 async function applyBitrate(pc) {
-  const max = QUALITY[$('quality').value].bitrate;
+  const max = quality.bitrate;
   for (const snd of pc.getSenders()) {
     if (snd.track?.kind !== 'video') continue;
     const p = snd.getParameters();
@@ -82,7 +79,6 @@ async function applyBitrate(pc) {
 }
 
 $('camsel').onchange = restartCamera;
-$('quality').onchange = startCamera;
 navigator.mediaDevices.addEventListener('devicechange', () => listCameras());
 
 // ---------- WebRTC (answer offers from drive pages) ----------
@@ -117,6 +113,13 @@ socket.on('webrtc_offer', async ({ sid, sdp, type }) => {
   applyBitrate(pc);
 });
 
+socket.on('video_quality', async (q) => {
+  const same = q.width === quality.width && q.height === quality.height && q.fps === quality.fps;
+  quality = q;
+  $('quality').textContent = `${q.name}: ${q.height}p, ${q.bitrate / 1e6} Mbps`;
+  if (!same && stream) await startCamera();         // new size: swap the track live
+  for (const pc of peers.values()) applyBitrate(pc);
+});
 socket.on('viewer_left', closePeer);
 socket.on('video_stop', () => { [...peers.keys()].forEach(closePeer); });
 socket.on('video_status', ({ source }) => {

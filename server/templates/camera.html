@@ -22,13 +22,7 @@
   <main>
     <div class="camform">
       <label>Camera <select id="camsel"></select></label>
-      <label>Quality
-        <select id="quality">
-          <option value="480">640x480, 1 Mbps</option>
-          <option value="720" selected>1280x720, 2.5 Mbps</option>
-          <option value="1080">1920x1080, 4 Mbps</option>
-        </select>
-      </label>
+      <label>Quality (set on the drive page) <span id="quality" class="pill">--</span></label>
     </div>
     <div id="view">
       <video id="cam" autoplay playsinline muted></video>

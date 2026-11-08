@@ -42,6 +42,22 @@ failed_logins = {}  # ip -> (count, first_fail_time)
 last_pwm = None
 
 
+# ---- Video quality presets (used by the car camera and the phone camera) ----
+VIDEO_PRESETS = {
+    "saver":  {"name": "Data saver", "width": 320,  "height": 240,  "fps": 15, "bitrate": 250_000},
+    "low":    {"name": "Low",        "width": 640,  "height": 480,  "fps": 20, "bitrate": 600_000},
+    "medium": {"name": "Medium",     "width": 640,  "height": 480,  "fps": 30, "bitrate": 1_200_000},
+    "high":   {"name": "High",       "width": 1280, "height": 720,  "fps": 30, "bitrate": 2_500_000},
+    "max":    {"name": "Max",        "width": 1920, "height": 1080, "fps": 30, "bitrate": 4_000_000},
+}
+
+
+def preset_label(p):
+    mb_per_hour = p["bitrate"] * 3600 / 8 / 1e6
+    size = f"{mb_per_hour / 1000:.1f} GB" if mb_per_hour >= 1000 else f"{mb_per_hour:.0f} MB"
+    return f'{p["name"]}: {p["height"]}p, {p["bitrate"] / 1e6:g} Mbps (~{size}/h)'
+
+
 # ---- Tuning settings (server does all the math, the Pi only outputs PWM) ----
 # key: (label, default, min, max, step). bool settings use min=max=None.
 SETTINGS_SPEC = {
@@ -57,6 +73,9 @@ SETTINGS_SPEC = {
     "pwm_min_us":            ("PWM min limit (us)",      1000,  500, 1500, 10),
     "pwm_max_us":            ("PWM max limit (us)",      2000, 1500, 2500, 10),
     "video_from_phone":      ("Video from phone camera (/camera)", False, None, None, None),
+    "video_quality":         ("Video quality",        "medium", None, None, None),
+    "video_rotate":          ("Rotate video 180°",       False, None, None, None),
+    "video_mirror":          ("Mirror video (left/right)", False, None, None, None),
 }
 settings = {k: v[1] for k, v in SETTINGS_SPEC.items()}
 _save_timer = None
@@ -100,6 +119,10 @@ def validate_setting(key, value):
     label, default, lo, hi, step = SETTINGS_SPEC[key]
     if isinstance(default, bool):
         return bool(value)
+    if isinstance(default, str):  # choice from VIDEO_PRESETS
+        if value not in VIDEO_PRESETS:
+            raise ValueError("unknown preset")
+        return value
     v = float(value)
     if v != v:  # NaN
         raise ValueError("NaN")
@@ -108,9 +131,24 @@ def validate_setting(key, value):
 
 
 def settings_payload():
-    return [{"key": k, "label": spec[0], "value": settings[k], "default": spec[1],
-             "min": spec[2], "max": spec[3], "step": spec[4]}
-            for k, spec in SETTINGS_SPEC.items()]
+    out = []
+    for k, spec in SETTINGS_SPEC.items():
+        item = {"key": k, "label": spec[0], "value": settings[k], "default": spec[1],
+                "min": spec[2], "max": spec[3], "step": spec[4]}
+        if k == "video_quality":
+            item["choices"] = [[key, preset_label(p)] for key, p in VIDEO_PRESETS.items()]
+        out.append(item)
+    return out
+
+
+def video_preset():
+    return VIDEO_PRESETS[settings["video_quality"]]
+
+
+def send_quality():
+    for sid in (car_sid, phonecam_sid):
+        if sid:
+            socketio.emit("video_quality", video_preset(), to=sid)
 
 
 def compute_pwm(t, s):
@@ -257,6 +295,7 @@ def on_connect(auth):
         socketio.emit("car_status", True)
         socketio.emit("video_status", video_status())
         emit("pwm_failsafe", failsafe_pwm())
+        emit("video_quality", video_preset())
         if settings["video_from_phone"]:
             emit("video_stop")
         return
@@ -267,6 +306,7 @@ def on_connect(auth):
             socketio.emit("replaced", to=phonecam_sid)  # only one phone camera
         phonecam_sid = request.sid
         print("Phone camera connected")
+        emit("video_quality", video_preset())
         socketio.emit("video_status", video_status())
         return
     print("Browser connected")
@@ -330,6 +370,13 @@ def webrtc_answer(data):
     socketio.emit("webrtc_answer", {"sdp": data["sdp"], "type": data["type"]}, to=data["sid"])
 
 
+@socketio.on("video_restart")
+def video_restart():
+    """The car reopened its camera (new quality): viewers reconnect."""
+    if request.sid == car_sid and not settings["video_from_phone"]:
+        socketio.emit("video_status", video_status())
+
+
 def video_source_changed():
     """Stop the old source (saves hotspot data) and make viewers reconnect."""
     old = car_sid if settings["video_from_phone"] else phonecam_sid
@@ -343,6 +390,7 @@ def set_setting(data):
     if is_source(request.sid):
         return
     old_source = settings["video_from_phone"]
+    old_quality = settings["video_quality"]
     try:
         key = data["key"]
         if key not in SETTINGS_SPEC:
@@ -356,6 +404,8 @@ def set_setting(data):
     socketio.emit("settings", settings_payload())
     if settings["video_from_phone"] != old_source:
         video_source_changed()
+    if settings["video_quality"] != old_quality:
+        send_quality()
     send_failsafe()
     send_update()
 
@@ -365,11 +415,14 @@ def reset_settings():
     if is_source(request.sid):
         return
     old_source = settings["video_from_phone"]
+    old_quality = settings["video_quality"]
     settings.update({k: v[1] for k, v in SETTINGS_SPEC.items()})
     save_settings()
     socketio.emit("settings", settings_payload())
     if settings["video_from_phone"] != old_source:
         video_source_changed()
+    if settings["video_quality"] != old_quality:
+        send_quality()
     send_failsafe()
     send_update()
 

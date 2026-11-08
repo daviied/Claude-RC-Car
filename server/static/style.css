@@ -53,3 +53,6 @@ body.ctl #view video { width: 100%; height: 100%; max-width: none; aspect-ratio:
 .camform select { padding: 8px; font-size: 15px; background: var(--btn); color: var(--fg); border: 1px solid #333; border-radius: 6px; }
 .camhelp { max-width: 960px; }
 @media (pointer: coarse) { .camhelp, #msg { display: block; } }
+#qbar { display: flex; align-items: center; gap: 8px; font-size: 14px; width: 100%; max-width: 960px; }
+#qbar select { flex: 1; max-width: 360px; padding: 6px; font-size: 14px; background: var(--btn); color: var(--fg); border: 1px solid #333; border-radius: 6px; }
+body.ctl #qbar { display: none; }

@@ -232,6 +232,8 @@ socket.on('settings', (list) => {
   const box = $('settings');
   list.forEach((s) => {
     settings[s.key] = s;
+    if (s.choices) return showQuality(s);
+    if (s.key === 'video_rotate' || s.key === 'video_mirror') flipVideo();
     let row = document.getElementById('row-' + s.key);
     if (!row) {
       row = document.createElement('label');
@@ -264,7 +266,23 @@ socket.on('settings', (list) => {
   });
 });
 
-$('reset').onclick = () => { if (confirm('Reset all tuning to defaults?')) socket.emit('reset_settings'); };
+// Flip the picture in the browser (no extra work for the car or phone)
+function flipVideo() {
+  const rot = settings.video_rotate?.value, mir = settings.video_mirror?.value;
+  $('cam').style.transform = `scale(${rot !== mir ? -1 : 1}, ${rot ? -1 : 1})`;
+}
+
+// Video quality dropdown (applies to the car camera and the phone camera)
+function showQuality(s) {
+  const sel = $('quality');
+  if (!sel.options.length) {
+    s.choices.forEach(([value, label]) => sel.add(new Option(label, value)));
+    sel.onchange = () => { socket.emit('set_setting', { key: s.key, value: sel.value }); sel.blur(); };
+  }
+  sel.value = s.value;
+}
+
+$('reset').onclick =() => { if (confirm('Reset all tuning to defaults?')) socket.emit('reset_settings'); };
 
 // Change a setting by a step (server clamps it) and show the new value
 let toastTimer;
