@@ -45,6 +45,13 @@ body.ctl header { position: fixed; top: 0; left: 0; right: 0; z-index: 2; paddin
 body.ctl header > span:first-child, body.ctl header a { display: none; }
 body.ctl #view { position: fixed; inset: 0; max-width: none; background: #000; }
 body.ctl #view video { width: 100%; height: 100%; max-width: none; aspect-ratio: auto; border-radius: 0; }
+/* Network badge: only in full screen (controller mode) */
+#netbadge { display: none; }
+body.ctl #netbadge { display: block; position: absolute; left: 12px; bottom: 12px; padding: 4px 10px; border-radius: 999px; font-size: 13px; background: rgba(0,0,0,.6); border-left: 4px solid var(--muted); pointer-events: none; }
+body.ctl #netbadge.on { border-left-color: #43a047; }
+body.ctl #netbadge.warn { border-left-color: #fb8c00; }
+body.ctl #netbadge.off { border-left-color: #e53935; }
+body.ctl #netbadge.q-poor { color: #ff8a80; }
 #fsbtn { position: absolute; left: 50%; bottom: 24px; transform: translateX(-50%); padding: 12px 20px; font-size: 16px; border: 0; border-radius: 999px; background: rgba(46,125,50,.9); color: var(--fg); }
 
 /* Phone camera page */
@@ -80,3 +87,4 @@ body.ctl #qbar, body.ctl #wifi { display: none; }
 #wform { display: grid; gap: 8px; margin-top: 10px; max-width: 360px; }
 #wform input { padding: 8px; font-size: 16px; background: var(--btn); color: var(--fg); border: 1px solid #333; border-radius: 6px; }
 #wform button[type=submit] { background: var(--on); }
+body.ctl #toast { top: 44px; }

@@ -63,7 +63,7 @@ APP_PASSWORD=test CAR_TOKEN=test COOKIE_SECURE=false python server/app.py
 |---|---|---|---|
 | Keyboard | W/S or ↑/↓ | A/D or ←/→ | Q E G H |
 | Touch | ▲ ▼ | ◀ ▶ | – |
-| Game controller | RT forward, LT reverse | Left stick X | D-pad ◀▶ steering trim, ▲▼ throttle neutral trim · Y/A speed +/− · B/X steering gain +/− |
+| Game controller | RT forward, LT reverse | Left stick X | D-pad ◀▶ steering trim, ▲▼ throttle neutral trim · Y/A speed +/− · B/X steering gain +/− · RB Wi-Fi ⇄ hotspot · LB auto network |
 
 Controller: Xbox, PlayStation and most USB/Bluetooth pads. Press any button once after the page opens so the browser detects it. Values are analog (-1.0 to 1.0). When a controller connects, the camera fills the screen and the phone locks to landscape (Android; tap once if the browser asks). The screen stays awake while the page is open.
 
@@ -77,6 +77,7 @@ The car uses campus Wi-Fi when it is strong enough, and the phone (Ethernet adap
 
 - **Car network** dropdown: *Auto* (Wi-Fi first), *Wi-Fi only*, *Phone hotspot only*. If the chosen network stops working, the car uses the other one, so it stays online and you can switch back.
 - Auto moves to Wi-Fi when it is strong for `WIFI_STABLE_S` (6 s): signal ≥ `WIFI_MIN_SIGNAL` (40 %), loss ≤ `WIFI_MAX_LOSS` (10 %), round trip ≤ `WIFI_MAX_RTT_MS` (250 ms). It leaves Wi-Fi when it is weak for `WIFI_POOR_S` (5 s) or stops working (about 4 s).
+- Full screen (controller): a badge at the bottom left shows network, quality, round trip, mode and hotspot data used. A message shows when the car changes network.
 - Header pill: active network and quality (▂▄▆█ good, ▂▄▆ fair, ▂ poor). Tap it for each network's round trip, loss and signal.
 - **Car network** panel: data used per network kind and per interface (counted on the Pi, kept across restarts, Reset button), and the Wi-Fi list: Scan, tap a network to connect (school Wi-Fi asks for username + password, PEAP/MSCHAPv2), Forget. Passwords go only to the Pi (NetworkManager); the server does not save them.
 - Strongest Wi-Fi: while Wi-Fi is weak or not in use, the car checks every `WIFI_ROAM_S` (20 s) and connects to the strongest saved network (at least `WIFI_ROAM_GAIN` = 15 % stronger). Save all campus networks once in the Wi-Fi list.

@@ -171,6 +171,20 @@ function controllerMode(on) {
 $('fsbtn').onclick = enterFullscreen;
 $('view').addEventListener('click', () => document.body.classList.contains('ctl') && enterFullscreen());
 
+const netBtnDown = {};
+const MODE_NAME = { auto: 'Auto (Wi-Fi first)', wifi: 'Wi-Fi only', hotspot: 'Hotspot only' };
+function netButton(i) {
+  const cur = settings.link_mode?.value || 'auto';
+  let next = 'auto';
+  if (i === 5) {  // RB: go to the other network than the one in use now
+    const now = cur === 'auto' ? (link.kind === 'wifi' ? 'wifi' : 'hotspot') : cur;
+    next = now === 'wifi' ? 'hotspot' : 'wifi';
+  }
+  if (settings.link_mode) settings.link_mode.value = next;
+  socket.emit('set_setting', { key: 'link_mode', value: next });
+  showToast('Network: ' + MODE_NAME[next]);
+}
+
 function pollPad() {
   requestAnimationFrame(pollPad);
   if (padIndex === null) return;
@@ -189,6 +203,13 @@ function pollPad() {
     socket.emit('Pad', v);
     lastPad = v;
     lastPadSent = now;
+  }
+
+  // Network: RB toggles Wi-Fi / hotspot, LB sets Auto (once per press)
+  for (const i of [4, 5]) {
+    const down = btn(i).pressed;
+    if (down && !netBtnDown[i]) netButton(i);
+    netBtnDown[i] = down;
   }
 
   // Tuning buttons: act on press, repeat while held
@@ -308,11 +329,27 @@ function showLink() {
     + (l.signal != null ? `, signal ${l.signal}%` : '');
   el.title = [link.note, ...(link.links || []).map(desc)].filter(Boolean).join('\n');
   $('wifinow').textContent = link.wifi_ssid || 'not connected';
+  // Full-screen badge: network, quality, round trip, hotspot data used
+  const hs = link.traffic?.kinds?.hotspot;
+  const nb = $('netbadge');
+  nb.textContent = !link.active ? 'No network'
+    : `${link.kind === 'wifi' ? 'Wi-Fi ' + (link.ssid || '') : 'Hotspot'} ${q}`
+      + (link.rtt != null ? ` · ${Math.round(link.rtt)} ms` : '')
+      + (link.mode && link.mode !== 'auto' ? ' · manual' : ' · auto')
+      + (hs ? ` · hotspot ${mb(hs.rx + hs.tx)}` : '');
+  nb.className = !link.active ? 'off' : (link.kind === 'wifi' ? 'on' : 'warn') + ' q-' + link.quality;
   // Mark the quality setting the car uses now
   const kind = link.kind === 'wifi' ? 'wifi' : 'hotspot';
   ['wifi', 'hotspot'].forEach((k) => document.getElementById('ch-video_quality_' + k)?.classList.toggle('inuse', k === kind && !!link.active));
 }
-socket.on('link', (l) => { link = l || {}; showLink(); showTraffic(); });
+socket.on('link', (l) => {
+  const old = link.active ? link.kind : null;
+  link = l || {};
+  showLink();
+  showTraffic();
+  const now = link.active ? link.kind : null;
+  if (old && now && old !== now) showToast(now === 'wifi' ? `Now on Wi-Fi ${link.ssid || ''}` : 'Now on hotspot', 2500);
+});
 
 // Data used by the car, per network kind and per interface (counted on the Pi)
 const mb = (b) => (b >= 1e9 ? (b / 1e9).toFixed(2) + ' GB' : (b / 1e6).toFixed(1) + ' MB');
@@ -391,11 +428,15 @@ function adjustSetting(key, delta) {
   const v = Math.round((s.value + delta) * 1000) / 1000;
   s.value = Math.max(s.min, Math.min(s.max, v));  // so held repeats keep counting
   socket.emit('set_setting', { key, value: s.value });
+  showToast(`${s.label}: ${s.value}`);
+}
+
+function showToast(text, ms = 1500) {
   const t = $('toast');
-  t.textContent = `${s.label}: ${s.value}`;
+  t.textContent = text;
   t.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { t.hidden = true; }, 1500);
+  toastTimer = setTimeout(() => { t.hidden = true; }, ms);
 }
 
 // [ and ] keys: steering trim in 5 us steps
