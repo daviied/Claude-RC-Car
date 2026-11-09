@@ -17,6 +17,8 @@ from aiortc import (RTCConfiguration, RTCIceServer, RTCPeerConnection,
                     RTCSessionDescription, VideoStreamTrack)
 from aiortc.contrib.media import MediaRelay
 
+import net
+
 SERVER_URL = os.environ.get("SERVER_URL", "http://127.0.0.1:5000")
 CAR_TOKEN = os.environ.get("CAR_TOKEN", "")
 CAMERA = os.environ.get("CAMERA", "auto")           # "auto", "picam" or "usb"
@@ -307,6 +309,7 @@ def parse_pair(data):
 async def connect():
     print("I'm connected!")
     stop()
+    asyncio.create_task(netmon.send_report(force=True))
 
 
 @sio.event
@@ -461,6 +464,66 @@ async def connect_watchdog(sid, pc):
         await close_pc(sid)
 
 
+# ---------- Network (Wi-Fi first, phone hotspot as backup) ----------
+async def on_net_switch(old, new):
+    """Default route moved: old connections still use the old address, so reconnect."""
+    if old is None:
+        return
+    for sid in list(pcs):
+        await close_pc(sid)
+    if sio.connected:
+        await sio.disconnect()  # main() connects again at once, through the new network
+
+
+async def on_net_report(report):
+    if sio.connected:
+        try:
+            await sio.emit("link", report)
+        except Exception:
+            pass
+
+
+netmon = net.NetMonitor(SERVER_URL, on_net_switch, on_net_report)
+
+
+@sio.on("link_mode")
+async def on_link_mode(mode):
+    netmon.set_mode(mode)
+
+
+@sio.on("traffic_reset")
+async def on_traffic_reset(data=None):
+    netmon.meter.reset()
+    print("Traffic counters reset")
+    await netmon.send_report(force=True)
+
+
+async def wifi_job(to, event, coro):
+    """Wi-Fi work can take 40 s: run it apart from the socket handlers."""
+    try:
+        result = await coro
+    except Exception as e:
+        result = {"ok": False, "msg": repr(e)} if event == "wifi_result" else {"error": repr(e)}
+    if sio.connected:
+        await sio.emit(event, {**result, "to": to})
+
+
+@sio.on("wifi_scan")
+async def on_wifi_scan(data):
+    asyncio.create_task(wifi_job(data.get("to"), "wifi_list", netmon.scan()))
+
+
+@sio.on("wifi_connect")
+async def on_wifi_connect(data):
+    asyncio.create_task(wifi_job(data.get("to"), "wifi_result", netmon.connect_wifi(
+        str(data.get("ssid", "")), str(data.get("password") or ""), str(data.get("identity") or ""))))
+
+
+@sio.on("wifi_forget")
+async def on_wifi_forget(data):
+    asyncio.create_task(wifi_job(data.get("to"), "wifi_result", netmon.forget_wifi(str(data.get("ssid", "")))))
+
+
 # ---------- Control loop ----------
 async def control_loop():
     global esc, servo
@@ -484,6 +547,7 @@ async def main():
     init_pwm()
     asyncio.create_task(control_loop())
     asyncio.create_task(stats_loop())
+    asyncio.create_task(netmon.run())
     while True:
         try:
             await sio.connect(SERVER_URL, auth={"role": "car", "token": CAR_TOKEN})
@@ -505,4 +569,5 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("Stopped.")
     finally:
+        netmon.meter.save()
         shutdown_pwm()

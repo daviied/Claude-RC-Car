@@ -18,6 +18,7 @@
     <span id="video" class="pill off">Video: idle</span>
     <span id="gp" class="pill off">No controller</span>
     <span id="rtt" class="pill">-- ms</span>
+    <span id="link" class="pill off">Network --</span>
     <a href="/logout">Log out</a>
   </header>
 
@@ -28,7 +29,7 @@
       <button id="fsbtn" type="button" hidden>Tap for full screen</button>
     </div>
 
-    <label id="qbar">Video quality <select id="quality"></select></label>
+    <div id="qbar"></div>
 
     <div id="pad">
       <button data-key="w" style="grid-area:up">▲</button>
@@ -37,6 +38,19 @@
       <button data-key="d" style="grid-area:right">▶</button>
     </div>
     <p class="hint">Keyboard: W A S D or arrow keys · [ ] steering trim · Controller: RT/LT throttle, left stick steer, D-pad trim, Y/A speed, B/X steering gain (press a button to connect)</p>
+
+    <details id="wifi">
+      <summary>Car network <span id="wifinow" class="pill">--</span></summary>
+      <div id="traffic"></div>
+      <div class="wifibar"><button id="wscan" type="button">Scan</button><span id="wmsg"></span></div>
+      <ul id="wlist"></ul>
+      <form id="wform" hidden>
+        <b id="wssid"></b>
+        <input id="wident" placeholder="Username (school Wi-Fi)" autocomplete="username" hidden>
+        <input id="wpass" type="password" placeholder="Password" autocomplete="current-password">
+        <div><button type="submit">Connect</button> <button id="wcancel" type="button">Cancel</button></div>
+      </form>
+    </details>
 
     <details id="tuning">
       <summary>Tuning <span id="pwm" class="pill">PWM -- / --</span></summary>

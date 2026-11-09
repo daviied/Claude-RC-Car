@@ -232,7 +232,7 @@ socket.on('settings', (list) => {
   const box = $('settings');
   list.forEach((s) => {
     settings[s.key] = s;
-    if (s.choices) return showQuality(s);
+    if (s.choices) return showChoice(s);
     if (s.key === 'video_rotate' || s.key === 'video_mirror') flipVideo();
     let row = document.getElementById('row-' + s.key);
     if (!row) {
@@ -272,15 +272,114 @@ function flipVideo() {
   $('cam').style.transform = `scale(${rot !== mir ? -1 : 1}, ${rot ? -1 : 1})`;
 }
 
-// Video quality dropdown (applies to the car camera and the phone camera)
-function showQuality(s) {
-  const sel = $('quality');
-  if (!sel.options.length) {
+// Dropdowns under the video: car network mode, video quality per network
+function showChoice(s) {
+  let row = document.getElementById('ch-' + s.key);
+  if (!row) {
+    row = document.createElement('label');
+    row.id = 'ch-' + s.key;
+    const name = document.createElement('span');
+    name.textContent = s.label;
+    const sel = document.createElement('select');
     s.choices.forEach(([value, label]) => sel.add(new Option(label, value)));
     sel.onchange = () => { socket.emit('set_setting', { key: s.key, value: sel.value }); sel.blur(); };
+    row.append(name, sel);
+    $('qbar').appendChild(row);
   }
-  sel.value = s.value;
+  row.querySelector('select').value = s.value;
+  showLink();
 }
+
+// ---------- Car network (Wi-Fi or phone hotspot) ----------
+let link = {};
+function showLink() {
+  const el = $('link');
+  const q = { good: '▂▄▆█', fair: '▂▄▆', poor: '▂', down: '✕' }[link.quality] || '';
+  if (!link.active) { el.textContent = 'Network --'; el.className = 'pill off'; }
+  else {
+    el.textContent = `${link.kind === 'wifi' ? 'Wi-Fi ' + (link.ssid || '') : 'Hotspot'} ${q}`;
+    el.className = 'pill ' + (link.kind === 'wifi' ? 'on' : 'warn') + ' q-' + link.quality;
+  }
+  if (link.mode && link.mode !== 'auto') el.textContent += ' (manual)';
+  if (link.note) el.textContent += ' !';
+  // Details on tap: each network with its quality
+  const desc = (l) => `${l.kind === 'wifi' ? 'Wi-Fi' : 'Hotspot'} (${l.iface}): ${l.up ? l.quality : 'down'}`
+    + (l.up && l.rtt != null ? `, ${Math.round(l.rtt)} ms` : '') + (l.loss ? `, ${l.loss}% lost` : '')
+    + (l.signal != null ? `, signal ${l.signal}%` : '');
+  el.title = [link.note, ...(link.links || []).map(desc)].filter(Boolean).join('\n');
+  $('wifinow').textContent = link.wifi_ssid || 'not connected';
+  // Mark the quality setting the car uses now
+  const kind = link.kind === 'wifi' ? 'wifi' : 'hotspot';
+  ['wifi', 'hotspot'].forEach((k) => document.getElementById('ch-video_quality_' + k)?.classList.toggle('inuse', k === kind && !!link.active));
+}
+socket.on('link', (l) => { link = l || {}; showLink(); showTraffic(); });
+
+// Data used by the car, per network kind and per interface (counted on the Pi)
+const mb = (b) => (b >= 1e9 ? (b / 1e9).toFixed(2) + ' GB' : (b / 1e6).toFixed(1) + ' MB');
+const esc = (x) => String(x).replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
+function showTraffic() {
+  const t = link.traffic, box = $('traffic');
+  if (!t) { box.textContent = ''; return; }
+  const row = (label, v, sum) => `<tr${sum ? ' class="sum"' : ''}><td>${label}</td><td>${mb(v.rx + v.tx)}</td><td>↓ ${mb(v.rx)}</td><td>↑ ${mb(v.tx)}</td></tr>`;
+  let html = '<table>';
+  [['hotspot', 'Hotspot'], ['wifi', 'Wi-Fi']].forEach(([k, n]) => { html += row(n, t.kinds[k] || { rx: 0, tx: 0 }, true); });
+  Object.entries(t.ifaces).sort().forEach(([i, v]) => { html += row('&nbsp;&nbsp;' + esc(i), v, false); });
+  html += `</table><div class="wifibar">Since ${esc(t.since)} <button id="treset" type="button">Reset</button></div>`;
+  box.innerHTML = html;
+  $('treset').onclick = () => { if (confirm('Reset the data counters?')) socket.emit('traffic_reset'); };
+}
+$('link').onclick = () => { if (el_title()) alert(el_title()); };
+const el_title = () => $('link').title;
+
+// Wi-Fi networks on the car (scan, connect, forget)
+let wnets = [], wpick = null;
+const wsay = (t) => { $('wmsg').textContent = t; };
+const bars = (sig) => (sig >= 70 ? '▂▄▆█' : sig >= 50 ? '▂▄▆' : sig >= 30 ? '▂▄' : '▂');
+$('wscan').onclick = () => { wsay('Scanning…'); socket.emit('wifi_scan'); };
+$('wifi').addEventListener('toggle', () => { if ($('wifi').open && !wnets.length) $('wscan').onclick(); });
+socket.on('wifi_list', (d) => {
+  if (d.error) { wsay(d.error); return; }
+  wnets = d.networks || [];
+  wsay(wnets.length ? '' : 'No networks found');
+  const ul = $('wlist');
+  ul.innerHTML = '';
+  wnets.forEach((n) => {
+    const li = document.createElement('li');
+    const name = document.createElement('span');
+    name.textContent = n.ssid;
+    const info = document.createElement('small');
+    info.textContent = `${bars(n.signal)} ${n.signal}%${n.security ? ' 🔒' : ''}${n.active ? ' · connected' : n.saved ? ' · saved' : ''}${n.hotspot ? ' · hotspot' : ''}`;
+    li.append(name, info);
+    if (n.active) li.className = 'active';
+    li.onclick = () => pickNet(n);
+    if (n.saved) {
+      const f = document.createElement('button');
+      f.type = 'button'; f.textContent = 'Forget';
+      f.onclick = (e) => { e.stopPropagation(); if (confirm(`Forget ${n.ssid} on the car?`)) { socket.emit('wifi_forget', { ssid: n.ssid }); wsay('Forgetting…'); } };
+      li.appendChild(f);
+    }
+    ul.appendChild(li);
+  });
+});
+function pickNet(n) {
+  wpick = n;
+  $('wssid').textContent = n.ssid;
+  $('wident').hidden = !/802\.1X|EAP/i.test(n.security || '');
+  $('wpass').hidden = !n.security;
+  $('wpass').value = $('wident').value = '';
+  $('wpass').placeholder = n.saved ? 'Password (empty = use saved)' : 'Password';
+  $('wform').hidden = false;
+}
+$('wcancel').onclick = () => { $('wform').hidden = true; };
+$('wform').onsubmit = (e) => {
+  e.preventDefault();
+  if (!wpick) return;
+  socket.emit('wifi_connect', { ssid: wpick.ssid, password: $('wpass').value, identity: $('wident').value });
+  $('wpass').value = '';
+  $('wform').hidden = true;
+  wsay(`Connecting to ${wpick.ssid}… (the car can drop for a few seconds)`);
+};
+socket.on('wifi_result', (r) => { wsay(r.msg || (r.ok ? 'Done' : 'Failed')); if (r.ok) setTimeout(() => socket.emit('wifi_scan'), 3000); });
 
 $('reset').onclick =() => { if (confirm('Reset all tuning to defaults?')) socket.emit('reset_settings'); };
 

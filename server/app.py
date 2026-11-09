@@ -38,12 +38,14 @@ pad_speed = 0.0  # game controller: -1.0 .. 1.0
 pad_turn = 0.0
 car_sid = None
 phonecam_sid = None  # phone browser that streams a USB webcam (/camera page)
+car_link = {}  # car network report: active, kind ("wifi"/"hotspot"), links, ...
 failed_logins = {}  # ip -> (count, first_fail_time)
 last_pwm = None
 
 
 # ---- Video quality presets (used by the car camera and the phone camera) ----
 VIDEO_PRESETS = {
+    "minimum": {"name": "Minimum",   "width": 320,  "height": 240,  "fps": 10, "bitrate": 100_000},
     "saver":  {"name": "Data saver", "width": 320,  "height": 240,  "fps": 15, "bitrate": 250_000},
     "low":    {"name": "Low",        "width": 640,  "height": 480,  "fps": 20, "bitrate": 600_000},
     "medium": {"name": "Medium",     "width": 640,  "height": 480,  "fps": 30, "bitrate": 1_200_000},
@@ -73,10 +75,22 @@ SETTINGS_SPEC = {
     "pwm_min_us":            ("PWM min limit (us)",      1000,  500, 1500, 10),
     "pwm_max_us":            ("PWM max limit (us)",      2000, 1500, 2500, 10),
     "video_from_phone":      ("Video from phone camera (/camera)", False, None, None, None),
-    "video_quality":         ("Video quality",        "medium", None, None, None),
+    "video_quality_wifi":    ("Car video on Wi-Fi",    "medium", None, None, None),
+    "video_quality_hotspot": ("Car video on hotspot",  "saver",  None, None, None),
+    "video_quality_phone":   ("Phone camera video",    "medium", None, None, None),
+    "link_mode":             ("Car network",           "auto",   None, None, None),
     "video_rotate":          ("Rotate video 180°",       False, None, None, None),
     "video_mirror":          ("Mirror video (left/right)", False, None, None, None),
 }
+LINK_MODES = {"auto": "Auto (Wi-Fi first)", "wifi": "Wi-Fi only", "hotspot": "Phone hotspot only"}
+
+
+def choices(key):
+    if key == "link_mode":
+        return list(LINK_MODES.items())
+    return [(k, preset_label(p)) for k, p in VIDEO_PRESETS.items()]
+
+
 settings = {k: v[1] for k, v in SETTINGS_SPEC.items()}
 _save_timer = None
 
@@ -84,9 +98,13 @@ _save_timer = None
 def load_settings():
     try:
         with open(SETTINGS_FILE) as f:
-            for k, v in json.load(f).items():
-                if k in SETTINGS_SPEC:
-                    settings[k] = validate_setting(k, v)
+            saved = json.load(f)
+        if "video_quality" in saved:  # old single quality setting
+            saved.setdefault("video_quality_wifi", saved["video_quality"])
+            saved.setdefault("video_quality_phone", saved["video_quality"])
+        for k, v in saved.items():
+            if k in SETTINGS_SPEC:
+                settings[k] = validate_setting(k, v)
         print("Settings loaded from", SETTINGS_FILE)
     except FileNotFoundError:
         pass
@@ -119,9 +137,9 @@ def validate_setting(key, value):
     label, default, lo, hi, step = SETTINGS_SPEC[key]
     if isinstance(default, bool):
         return bool(value)
-    if isinstance(default, str):  # choice from VIDEO_PRESETS
-        if value not in VIDEO_PRESETS:
-            raise ValueError("unknown preset")
+    if isinstance(default, str):  # choice
+        if value not in dict(choices(key)):
+            raise ValueError("unknown choice")
         return value
     v = float(value)
     if v != v:  # NaN
@@ -135,20 +153,33 @@ def settings_payload():
     for k, spec in SETTINGS_SPEC.items():
         item = {"key": k, "label": spec[0], "value": settings[k], "default": spec[1],
                 "min": spec[2], "max": spec[3], "step": spec[4]}
-        if k == "video_quality":
-            item["choices"] = [[key, preset_label(p)] for key, p in VIDEO_PRESETS.items()]
+        if isinstance(spec[1], str):
+            item["choices"] = [list(c) for c in choices(k)]
         out.append(item)
     return out
 
 
-def video_preset():
-    return VIDEO_PRESETS[settings["video_quality"]]
+QUALITY_KEYS = ("video_quality_wifi", "video_quality_hotspot", "video_quality_phone")
+
+
+def car_kind():
+    """Network the car uses now. Unknown counts as hotspot (saves data)."""
+    return "wifi" if car_link.get("kind") == "wifi" else "hotspot"
+
+
+def car_preset():
+    return VIDEO_PRESETS[settings["video_quality_" + car_kind()]]
+
+
+def phone_preset():
+    return VIDEO_PRESETS[settings["video_quality_phone"]]
 
 
 def send_quality():
-    for sid in (car_sid, phonecam_sid):
-        if sid:
-            socketio.emit("video_quality", video_preset(), to=sid)
+    if car_sid:
+        socketio.emit("video_quality", car_preset(), to=car_sid)
+    if phonecam_sid:
+        socketio.emit("video_quality", phone_preset(), to=phonecam_sid)
 
 
 def compute_pwm(t, s):
@@ -295,7 +326,8 @@ def on_connect(auth):
         socketio.emit("car_status", True)
         socketio.emit("video_status", video_status())
         emit("pwm_failsafe", failsafe_pwm())
-        emit("video_quality", video_preset())
+        emit("link_mode", settings["link_mode"])
+        emit("video_quality", car_preset())
         if settings["video_from_phone"]:
             emit("video_stop")
         return
@@ -306,7 +338,7 @@ def on_connect(auth):
             socketio.emit("replaced", to=phonecam_sid)  # only one phone camera
         phonecam_sid = request.sid
         print("Phone camera connected")
-        emit("video_quality", video_preset())
+        emit("video_quality", phone_preset())
         socketio.emit("video_status", video_status())
         return
     print("Browser connected")
@@ -314,6 +346,7 @@ def on_connect(auth):
     emit("video_status", video_status())
     emit("settings", settings_payload())
     emit("pwm_out", last_pwm or failsafe_pwm())
+    emit("link", car_link)
 
 
 @socketio.on("disconnect")
@@ -321,6 +354,8 @@ def on_disconnect(reason=None):
     global car_sid, phonecam_sid, speed, turn, pad_speed, pad_turn
     if request.sid == car_sid:
         car_sid = None
+        car_link.clear()
+        socketio.emit("link", car_link)
         print("Car disconnected:", reason)
         socketio.emit("car_status", False)
         socketio.emit("video_status", video_status())
@@ -390,7 +425,8 @@ def set_setting(data):
     if is_source(request.sid):
         return
     old_source = settings["video_from_phone"]
-    old_quality = settings["video_quality"]
+    old_quality = [settings[k] for k in QUALITY_KEYS]
+    old_link = settings["link_mode"]
     try:
         key = data["key"]
         if key not in SETTINGS_SPEC:
@@ -404,8 +440,10 @@ def set_setting(data):
     socketio.emit("settings", settings_payload())
     if settings["video_from_phone"] != old_source:
         video_source_changed()
-    if settings["video_quality"] != old_quality:
+    if [settings[k] for k in QUALITY_KEYS] != old_quality:
         send_quality()
+    if settings["link_mode"] != old_link and car_sid:
+        socketio.emit("link_mode", settings["link_mode"], to=car_sid)
     send_failsafe()
     send_update()
 
@@ -415,16 +453,98 @@ def reset_settings():
     if is_source(request.sid):
         return
     old_source = settings["video_from_phone"]
-    old_quality = settings["video_quality"]
+    old_quality = [settings[k] for k in QUALITY_KEYS]
+    old_link = settings["link_mode"]
     settings.update({k: v[1] for k, v in SETTINGS_SPEC.items()})
     save_settings()
     socketio.emit("settings", settings_payload())
     if settings["video_from_phone"] != old_source:
         video_source_changed()
-    if settings["video_quality"] != old_quality:
+    if [settings[k] for k in QUALITY_KEYS] != old_quality:
         send_quality()
+    if settings["link_mode"] != old_link and car_sid:
+        socketio.emit("link_mode", settings["link_mode"], to=car_sid)
     send_failsafe()
     send_update()
+
+
+# ---- Car network: link report and Wi-Fi networks (the car does the work) ----
+@socketio.on("link")
+def on_link(data):
+    """The car reports which network it uses (Wi-Fi or phone hotspot)."""
+    if request.sid != car_sid or not isinstance(data, dict):
+        return
+    old = car_kind()
+    car_link.clear()
+    car_link.update(data)
+    socketio.emit("link", car_link)
+    if car_kind() != old:
+        print("Car network:", car_link.get("active"), car_kind())
+        send_quality()
+
+
+def short_str(v, n):
+    v = "" if v is None else str(v)
+    if len(v.encode()) > n:
+        raise ValueError("too long")
+    return v
+
+
+def to_car(event, data):
+    if is_source(request.sid):
+        return
+    if not car_sid:
+        emit("wifi_result", {"ok": False, "msg": "Car is offline"})
+        return
+    socketio.emit(event, {**data, "to": request.sid}, to=car_sid)
+
+
+@socketio.on("traffic_reset")
+def traffic_reset():
+    if not is_source(request.sid) and car_sid:
+        socketio.emit("traffic_reset", to=car_sid)
+
+
+@socketio.on("wifi_scan")
+def wifi_scan():
+    to_car("wifi_scan", {})
+
+
+@socketio.on("wifi_connect")
+def wifi_connect(data):
+    try:  # password goes only to the car; never logged or saved here
+        d = {"ssid": short_str(data["ssid"], 32), "password": short_str(data.get("password"), 128),
+             "identity": short_str(data.get("identity"), 128)}
+    except (TypeError, ValueError, KeyError):
+        emit("wifi_result", {"ok": False, "msg": "Bad network name or password"})
+        return
+    if d["ssid"]:
+        to_car("wifi_connect", d)
+
+
+@socketio.on("wifi_forget")
+def wifi_forget(data):
+    try:
+        to_car("wifi_forget", {"ssid": short_str(data["ssid"], 32)})
+    except (TypeError, ValueError, KeyError):
+        pass
+
+
+def car_answer(event, data):
+    """Car answer -> the browser that asked."""
+    if request.sid != car_sid or not isinstance(data, dict) or not data.get("to"):
+        return
+    socketio.emit(event, {k: v for k, v in data.items() if k != "to"}, to=data["to"])
+
+
+@socketio.on("wifi_list")
+def wifi_list(data):
+    car_answer("wifi_list", data)
+
+
+@socketio.on("wifi_result")
+def wifi_result(data):
+    car_answer("wifi_result", data)
 
 
 @socketio.on("Pad")

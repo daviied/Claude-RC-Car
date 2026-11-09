@@ -69,7 +69,27 @@ Controller: Xbox, PlayStation and most USB/Bluetooth pads. Press any button once
 
 Camera: `CAMERA=auto` uses a Pi camera (ribbon cable) if one is found, else the first USB webcam.
 
-Video quality: pick a preset in the **Video quality** dropdown under the video (Data saver 240p / 0.25 Mbps up to Max 1080p / 4 Mbps; each shows its data use per hour). It applies to the car camera and the phone camera. The car caps resolution at `VIDEO_MAX_HEIGHT` (default 720), because the Pi 4 encodes video in software.
+Video quality: the dropdowns under the video set the quality for **car video on Wi-Fi**, **car video on hotspot** and the **phone camera** (Minimum 240p / 0.1 Mbps up to Max 1080p / 4 Mbps; each shows its data use per hour). The car uses the Wi-Fi or hotspot preset for the network it is on now ("in use"). The car caps resolution at `VIDEO_MAX_HEIGHT` (default 720), because the Pi 4 encodes video in software.
+
+## Car network (Wi-Fi first, phone hotspot as backup)
+
+The car uses campus Wi-Fi when it is strong enough, and the phone (Ethernet adapter or USB tethering) when it is not. This saves hotspot data.
+
+- **Car network** dropdown: *Auto* (Wi-Fi first), *Wi-Fi only*, *Phone hotspot only*. If the chosen network stops working, the car uses the other one, so it stays online and you can switch back.
+- Auto moves to Wi-Fi when it is strong for `WIFI_STABLE_S` (6 s): signal ≥ `WIFI_MIN_SIGNAL` (40 %), loss ≤ `WIFI_MAX_LOSS` (10 %), round trip ≤ `WIFI_MAX_RTT_MS` (250 ms). It leaves Wi-Fi when it is weak for `WIFI_POOR_S` (5 s) or stops working (about 4 s).
+- Header pill: active network and quality (▂▄▆█ good, ▂▄▆ fair, ▂ poor). Tap it for each network's round trip, loss and signal.
+- **Car network** panel: data used per network kind and per interface (counted on the Pi, kept across restarts, Reset button), and the Wi-Fi list: Scan, tap a network to connect (school Wi-Fi asks for username + password, PEAP/MSCHAPv2), Forget. Passwords go only to the Pi (NetworkManager); the server does not save them.
+- Strongest Wi-Fi: while Wi-Fi is weak or not in use, the car checks every `WIFI_ROAM_S` (20 s) and connects to the strongest saved network (at least `WIFI_ROAM_GAIN` = 15 % stronger). Save all campus networks once in the Wi-Fi list.
+- A network switch reconnects the car (about 1–3 s). The failsafe stops the car during the gap.
+- If the Pi joins the phone hotspot over Wi-Fi, put the hotspot name in `HOTSPOT_SSIDS` so it counts as hotspot.
+- Captive-portal Wi-Fi (web login page) does not work: the car sees it as "not working" and stays on the hotspot.
+
+Setup (once, on the Pi, where you can reach it with a keyboard if the network drops):
+
+```bash
+cd ~/Claude-RC-Car/car
+sudo bash setup-network.sh   # NetworkManager + permission for the car program
+```
 
 ### Phone camera (saves hotspot data)
 

@@ -1,6 +1,6 @@
 // Minimal service worker: caches the app shell so the PWA can install.
 // Live data (Socket.IO, WebRTC) is never cached.
-const CACHE = 'claude-rc-car-v7';
+const CACHE = 'claude-rc-car-v8';
 const SHELL = ['/static/style.css', '/static/app.js', '/static/icon.svg', '/manifest.webmanifest'];
 
 self.addEventListener('install', (e) => {
