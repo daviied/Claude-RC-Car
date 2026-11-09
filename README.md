@@ -85,7 +85,7 @@ The car uses campus Wi-Fi when it is strong enough, and the phone (Ethernet adap
 - If the Pi joins the phone hotspot over Wi-Fi, put the hotspot name in `HOTSPOT_SSIDS` so it counts as hotspot.
 - Captive-portal Wi-Fi (web login page) does not work: the car sees it as "not working" and stays on the hotspot.
 
-Setup (once, on the Pi, where you can reach it with a keyboard if the network drops):
+Setup (once, on the Pi). It does not change wired eth0; it only gives the car program permission for Wi-Fi and adds USB tethering:
 
 ```bash
 cd ~/Claude-RC-Car/car

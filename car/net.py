@@ -353,20 +353,32 @@ class NetMonitor:
         return self.active if cur and self.kind(self.active) == other else pick
 
     async def apply_routes(self, iface, routes):
-        """Make iface the default route (lowest metric). True if routes changed."""
-        if routes.get(iface) == ACTIVE_METRIC and all(
-                m > ACTIVE_METRIC for d, m in routes.items() if d != iface):
+        """Make iface the default route (lowest metric). True if routes changed.
+        Only NetworkManager devices (Wi-Fi) are changed: 50 when in use, else 700.
+        Others (eth0 on networkd, metric 100) keep their metric, so with two
+        networks moving the Wi-Fi metric above or below 100 is enough."""
+        if not HAS_NM:
+            if "nonm" not in self.warned:
+                self.warned.add("nonm")
+                print("Cannot switch networks:", NO_NM)
             return False
+        rc, out, _ = await run("nmcli", "-t", "-f", "DEVICE,STATE", "device", timeout=10)
+        managed = {f[0] for f in map(nm_fields, out.splitlines()) if len(f) >= 2 and f[1] != "unmanaged"}
+        changed = False
         for dev in routes:
+            if dev not in managed:
+                continue
             metric = ACTIVE_METRIC if dev == iface else IDLE_METRIC
-            if HAS_NM:
-                rc, _, err = await run("nmcli", "device", "modify", dev, "ipv4.route-metric", str(metric))
+            if routes[dev] == metric:
+                continue
+            rc, _, err = await run("nmcli", "device", "modify", dev, "ipv4.route-metric", str(metric))
+            if rc != 0:
+                if ("route" + dev) not in self.warned:
+                    self.warned.add("route" + dev)
+                    print(f"Cannot set route on {dev}: {nm_error(err)}")
             else:
-                rc, err = 1, NO_NM
-            if rc != 0 and ("route" + dev) not in self.warned:
-                self.warned.add("route" + dev)
-                print(f"Cannot set route on {dev}: {err}")
-        return True
+                changed = True
+        return changed
 
     async def run(self):
         print(f"Network monitor: Wi-Fi {WIFI_IFACE}, server {self.host}:{self.port}")
